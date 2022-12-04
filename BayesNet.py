@@ -76,6 +76,23 @@ class BayesNet:
         self.create_bn(variables, edges, cpts)
 
     # METHODS THAT MIGHT ME USEFUL -------------------------------------------------------------------------------------
+    def is_leaf_node(self, variable: str) -> bool:
+        """
+        Returns the children of the variable in the graph.
+        :param variable: Variable to get the children from
+        :return: List of children
+        """
+        return len(self.get_children(variable)) == 0
+
+    def exists_path(self, start, end) -> bool:
+        if start == end:
+            return True
+
+        for children in self.get_children(start):
+            if self.exists_path(children, end):
+                return True
+
+        return False
 
     def get_children(self, variable: str) -> List[str]:
         """
