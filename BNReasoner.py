@@ -22,10 +22,11 @@ class BNReasoner:
         full_set = Q.union(e)
         while True:
             for variable in self.bn.get_all_variables():
+                # If variable not in Q or E and is a leaf node => remove it
                 if variable not in full_set and self.bn.is_leaf_node(variable):
                     self.bn.del_var(variable)
                     continue
-
+                # If variable is evidence => remove outgoing edges
                 if variable in e:
                     for children in self.bn.get_children(variable):
                         self.bn.del_edge((variable, children))
