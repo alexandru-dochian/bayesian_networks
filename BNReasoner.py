@@ -1,7 +1,6 @@
 from typing import Union
-
 import pandas as pd
-
+from copy import deepcopy
 from BayesNet import BayesNet
 
 
@@ -22,19 +21,26 @@ class BNReasoner:
         self.bn.draw_structure()
 
     def prune(self, Q: set, e: set):
+        # If variable is evidence => remove outgoing edges
+        for variable in e:
+            for children in self.bn.get_children(variable):
+                self.bn.del_edge((variable, children))
+
         full_set = Q.union(e)
+
+        variables_to_check = self.bn.get_all_variables()
         while True:
-            for variable in self.bn.get_all_variables():
+            done = True
+            for variable in variables_to_check:
+
                 # If variable not in Q or E and is a leaf node => remove it
                 if variable not in full_set and self.bn.is_leaf_node(variable):
+                    done = False
                     self.bn.del_var(variable)
-                    continue
-                # If variable is evidence => remove outgoing edges
-                if variable in e:
-                    for children in self.bn.get_children(variable):
-                        self.bn.del_edge((variable, children))
-                    continue
-            break
+                    variables_to_check.remove(variable)
+
+            if done:
+                break
 
     def are_nodes_connected(self, start, end) -> bool:
         variables = self.bn.get_all_variables()
@@ -69,19 +75,61 @@ class BNReasoner:
         # TODO: ???
         pass
 
+    def d_separated(self, X: set[str], Y: set[str], Z: set[str]) -> bool:
+        self_copy = deepcopy(self)
+        self_copy.prune(Q=X.union(Y), e=Z)
+
+        for variable_in_X in X:
+            for variable_in_Y in Y:
+                if self_copy.are_nodes_connected(variable_in_X, variable_in_Y):
+                    return True
+        return False
+
     @staticmethod
     def marginalization(X: str, factor: pd.DataFrame) -> pd.DataFrame:
-        # TODO: compute the factor in which X is summed-out.
-        return factor
+        factor_name = factor.columns[-1]
+        new_columns = list(filter(lambda variable: variable != X, factor.columns))
+        new_variables = new_columns[:-1]
+
+        # Sum out
+        result = factor.groupby(new_variables).sum(factor_name)
+
+        # Reverse dataframe to preserve initial ordering
+        result = result.iloc[::-1]
+
+        # Reset indexes from 0
+        result = result.reset_index()
+
+        # Remove the maxed out variable
+        del result[X]
+
+        # Rename factor
+        result = result.rename(columns={factor_name: f"sum_{X} > {factor_name}"})
+
+        return result
 
     @staticmethod
     def maxing_out(X: str, factor: pd.DataFrame) -> pd.DataFrame:
-        # TODO: compute the factor in which X is maxed-out.
-
+        factor_name = factor.columns[-1]
         new_columns = list(filter(lambda variable: variable != X, factor.columns))
-        new_data = [[]]
+        new_variables = new_columns[:-1]
 
-        return pd.DataFrame(columns=[], data=new_data)
+        # Max out
+        result = factor.groupby(new_variables).max(factor_name)
+
+        # Reverse dataframe to preserve initial ordering
+        result = result.iloc[::-1]
+
+        # Reset indexes from 0
+        result = result.reset_index()
+
+        # Remove the maxed out variable
+        del result[X]
+
+        # Rename factor
+        result = result.rename(columns={factor_name: f"max_{X} > {factor_name}"})
+
+        return result
 
     @staticmethod
     def factor_multiplication(f: pd.DataFrame, g: pd.DataFrame) -> pd.DataFrame:
