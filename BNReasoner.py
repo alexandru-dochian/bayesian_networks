@@ -1,8 +1,9 @@
-from typing import Union
+from typing import Union, Dict, List
 import pandas as pd
 from copy import deepcopy
 from BayesNet import BayesNet
-
+import random
+import networkx as nx
 
 class BNReasoner:
     def __init__(self, net: Union[str, BayesNet]):
@@ -16,6 +17,51 @@ class BNReasoner:
             self.bn.load_from_bifxml(net)
         else:
             self.bn = net
+    
+    def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool]) -> float:
+        Q_and_e = Q.update(e)
+        return self.probability(Q_and_e) / self.probability(e)
+
+    def compute_map(self):
+        # TODO: ???
+        pass
+
+    def compute_mep(self):
+        # TODO: ???
+        pass
+
+
+    def probability(self, Q: Dict[str, bool]) -> float:
+        factors = []
+
+        # Find the factors relevant to this query
+        for variable in self.bn.get_all_variables():
+            factor = self.bn.get_cpt(variable)
+            if variable in Q:
+                factors.append(factor)
+
+        # Find variables to remove
+        variables_to_remove = list(filter(lambda variable: variable not in Q, self.bn.get_all_variables()))
+
+        # Remove all other variables
+        factors = BNReasoner.variable_elimination(variables_to_remove, factors, self.bn.get_interaction_graph())
+
+        # Multiply remaining factors
+        resulting_factor = None
+        for factor in factors:
+            if resulting_factor is None:
+                resulting_factor = factor
+                continue
+            resulting_factor = BNReasoner.factor_multiplication(factor, resulting_factor)
+
+        # Finding the row corresponding to the instantiation
+        corresponding_row = resulting_factor
+        for variable in Q:
+            instantiation = Q[variable]
+            corresponding_row = corresponding_row[corresponding_row[variable] == instantiation]
+
+        # Return the probability from the row
+        return corresponding_row.iloc[0][-1]
 
     def draw(self):
         self.bn.draw_structure()
@@ -49,31 +95,19 @@ class BNReasoner:
 
         return self.bn.exists_path(start, end) or self.bn.exists_path(end, start)
 
-    def ordering(self, X: set[str]) -> list[str]:
+    
+    @staticmethod
+    def variable_elimination(variables_to_remove: list[str], factors: List[pd.DataFrame], interaction_graph: nx.Graph) -> List[pd.DataFrame]:
+        variables_to_remove = BNReasoner.ordering(variables_to_remove, interaction_graph)
+
+        for variable_to_remove in variables_to_remove:
+            factors = list(map(lambda factor: BNReasoner.maxing_out(variable_to_remove, factor), factors))
+        return factors
+
+    @staticmethod
+    def ordering(variables: List[str], interaction_graph: nx.Graph) -> List[str]:
         # TODO: order X based on `min-degree` and the `min-fill` heuristics
-        bayes_net = self.bn
-        return []
-
-    def marginal_distribution(self, Q: set[str], e: set[str]) -> float:
-        # TODO: compute P(Q|e)
-        # TODO: ??? P(Q|e) = P(Q & e) / P(e)
-        bayes_net = self.bn
-        return 0.5
-
-    def variable_elimination(self, variables: list[str]) -> list[str]:
-        # TODO
-        bayes_net = self.bn
-        return []
-
-    @staticmethod
-    def compute_map():
-        # TODO: ???
-        pass
-
-    @staticmethod
-    def compute_mep():
-        # TODO: ???
-        pass
+        return variables
 
     def d_separated(self, X: set[str], Y: set[str], Z: set[str]) -> bool:
         self_copy = deepcopy(self)
@@ -110,6 +144,9 @@ class BNReasoner:
 
     @staticmethod
     def maxing_out(X: str, factor: pd.DataFrame) -> pd.DataFrame:
+        if X not in factor:
+            return factor
+
         factor_name = factor.columns[-1]
         new_columns = list(filter(lambda variable: variable != X, factor.columns))
         new_variables = new_columns[:-1]
@@ -138,12 +175,15 @@ class BNReasoner:
 
         # Merge dataframes        
         h = f.merge(g)
-        
+
         # Create new factor column
         h[f"{f_factor_name} * {g_factor_name}"] = h[f_factor_name] * h[g_factor_name]
 
         # Delete old factor columns
-        del h[f_factor_name]
-        del h[g_factor_name]
-        
+        if f_factor_name in h:
+            del h[f_factor_name]
+
+        if g_factor_name in h:
+            del h[g_factor_name]
+
         return h
