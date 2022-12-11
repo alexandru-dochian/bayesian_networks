@@ -133,7 +133,17 @@ class BNReasoner:
 
     @staticmethod
     def factor_multiplication(f: pd.DataFrame, g: pd.DataFrame) -> pd.DataFrame:
-        # TODO: compute the multiplied factor h = f * g.
-        g_columns = f.columns.union(g.columns)
-        h = pd.DataFrame(columns=g_columns, data=[])
+        f_factor_name = f.columns[-1]
+        g_factor_name = g.columns[-1]
+
+        # Merge dataframes        
+        h = f.merge(g)
+        
+        # Create new factor column
+        h[f"{f_factor_name} * {g_factor_name}"] = h[f_factor_name] * h[g_factor_name]
+
+        # Delete old factor columns
+        del h[f_factor_name]
+        del h[g_factor_name]
+        
         return h
