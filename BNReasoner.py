@@ -1,8 +1,8 @@
+import typing
 from typing import Union, Dict, List
 import pandas as pd
 from copy import deepcopy
 from BayesNet import BayesNet
-import random
 import networkx as nx
 
 class BNReasoner:
@@ -18,10 +18,6 @@ class BNReasoner:
         else:
             self.bn = net
     
-    def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool]) -> float:
-        Q_and_e = Q.update(e)
-        return self.probability(Q_and_e) / self.probability(e)
-
     def compute_map(self):
         # TODO: ???
         pass
@@ -42,6 +38,9 @@ class BNReasoner:
 
         # Remove all other variables
         factors = BNReasoner.variable_elimination(variables_to_remove, factors, self_copy.bn.get_interaction_graph())
+
+        # Filter out possible trivial factors
+        factors = list(filter(lambda factor: factor is not None, factors))
 
         # Multiply remaining factors
         resulting_factor = None
@@ -96,11 +95,11 @@ class BNReasoner:
 
     @staticmethod
     def variable_elimination(variables_to_remove: list[str], factors: List[pd.DataFrame],
-                             interaction_graph: nx.Graph) -> List[pd.DataFrame]:
+                             interaction_graph: nx.Graph) -> List[typing.Union[pd.DataFrame, None]]:
         variables_to_remove = BNReasoner.ordering(variables_to_remove, interaction_graph)
 
         for variable_to_remove in variables_to_remove:
-            factors = list(map(lambda factor: BNReasoner.maxing_out(variable_to_remove, factor), factors))
+            factors = list(map(lambda factor: BNReasoner.marginalization(variable_to_remove, factor), factors))
         return factors
 
     @staticmethod
@@ -124,10 +123,16 @@ class BNReasoner:
         return False
 
     @staticmethod
-    def marginalization(X: str, factor: pd.DataFrame) -> pd.DataFrame:
+    def marginalization(X: str, factor: pd.DataFrame) -> typing.Union[pd.DataFrame, None]:
+        if X not in factor.columns:
+            return factor
+
         factor_name = factor.columns[-1]
         new_columns = list(filter(lambda variable: variable != X, factor.columns))
         new_variables = new_columns[:-1]
+
+        if len(new_variables) == 0:
+            return None
 
         # Sum out
         result = factor.groupby(new_variables).sum(factor_name)
@@ -138,7 +143,7 @@ class BNReasoner:
         # Reset indexes from 0
         result = result.reset_index()
 
-        # Remove the maxed out variable
+        # Remove the summed out variable
         del result[X]
 
         # Rename factor
@@ -154,6 +159,8 @@ class BNReasoner:
         factor_name = factor.columns[-1]
         new_columns = list(filter(lambda variable: variable != X, factor.columns))
         new_variables = new_columns[:-1]
+        if len(new_variables) == 0:
+            return factor
 
         # Max out
         result = factor.groupby(new_variables).max(factor_name)
