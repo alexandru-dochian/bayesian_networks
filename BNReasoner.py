@@ -30,21 +30,18 @@ class BNReasoner:
         # TODO: ???
         pass
 
+    def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool], should_prune=True) -> pd.DataFrame:
+        self_copy = deepcopy(self)
+        if should_prune:
+            self_copy.prune(Q=Q, e=e)
 
-    def probability(self, Q: Dict[str, bool]) -> float:
-        factors = []
-
-        # Find the factors relevant to this query
-        for variable in self.bn.get_all_variables():
-            factor = self.bn.get_cpt(variable)
-            if variable in Q:
-                factors.append(factor)
+        factors = [self_copy.bn.get_cpt(variable) for variable in self_copy.bn.get_all_variables()]
 
         # Find variables to remove
-        variables_to_remove = list(filter(lambda variable: variable not in Q, self.bn.get_all_variables()))
+        variables_to_remove = list(filter(lambda variable: variable not in Q, self_copy.bn.get_all_variables()))
 
         # Remove all other variables
-        factors = BNReasoner.variable_elimination(variables_to_remove, factors, self.bn.get_interaction_graph())
+        factors = BNReasoner.variable_elimination(variables_to_remove, factors, self_copy.bn.get_interaction_graph())
 
         # Multiply remaining factors
         resulting_factor = None
@@ -54,25 +51,24 @@ class BNReasoner:
                 continue
             resulting_factor = BNReasoner.factor_multiplication(factor, resulting_factor)
 
-        # Finding the row corresponding to the instantiation
-        corresponding_row = resulting_factor
-        for variable in Q:
-            instantiation = Q[variable]
-            corresponding_row = corresponding_row[corresponding_row[variable] == instantiation]
-
-        # Return the probability from the row
-        return corresponding_row.iloc[0][-1]
+        return resulting_factor
 
     def draw(self):
         self.bn.draw_structure()
 
-    def prune(self, Q: set, e: set):
+    def prune(self, Q: Dict[str, bool], e: Dict[str, bool]):
         # If variable is evidence => remove outgoing edges
         for variable in e:
             for children in self.bn.get_children(variable):
+                reduced_factor = self.bn.reduce_factor(pd.Series({variable: e[variable]}), self.bn.get_cpt(children))
+                self.bn.update_cpt(children, reduced_factor)
                 self.bn.del_edge((variable, children))
 
-        full_set = Q.union(e)
+        full_set = {}
+        if len(Q.keys()) > 0:
+            full_set.update(Q)
+        if len(e.keys()) > 0:
+            full_set.update(e)
 
         variables_to_check = self.bn.get_all_variables()
         while True:
@@ -84,7 +80,6 @@ class BNReasoner:
                     done = False
                     self.bn.del_var(variable)
                     variables_to_check.remove(variable)
-
             if done:
                 break
 
@@ -92,12 +87,16 @@ class BNReasoner:
         variables = self.bn.get_all_variables()
         if start not in variables or end not in variables:
             return False
+        
+        # Building a bidirectional copy of the graph
+        bidirectional_graph = self.bn.structure.to_undirected()
+        
+        # Checking path using `networkx` builtin functionality
+        return nx.has_path(bidirectional_graph, start, end)
 
-        return self.bn.exists_path(start, end) or self.bn.exists_path(end, start)
-
-    
     @staticmethod
-    def variable_elimination(variables_to_remove: list[str], factors: List[pd.DataFrame], interaction_graph: nx.Graph) -> List[pd.DataFrame]:
+    def variable_elimination(variables_to_remove: list[str], factors: List[pd.DataFrame],
+                             interaction_graph: nx.Graph) -> List[pd.DataFrame]:
         variables_to_remove = BNReasoner.ordering(variables_to_remove, interaction_graph)
 
         for variable_to_remove in variables_to_remove:
@@ -109,9 +108,14 @@ class BNReasoner:
         # TODO: order X based on `min-degree` and the `min-fill` heuristics
         return variables
 
-    def d_separated(self, X: set[str], Y: set[str], Z: set[str]) -> bool:
+    def independence(self, X: Dict[str, bool], Y: Dict[str, bool], Z: Dict[str, bool]) -> bool:
+        return self.d_separated(X, Y, Z)
+
+    def d_separated(self, X: Dict[str, bool], Y: Dict[str, bool], Z: Dict[str, bool]) -> bool:
         self_copy = deepcopy(self)
-        self_copy.prune(Q=X.union(Y), e=Z)
+        Q = deepcopy(X)
+        Q.update(Y)
+        self_copy.prune(Q=Q, e=Z)
 
         for variable_in_X in X:
             for variable_in_Y in Y:

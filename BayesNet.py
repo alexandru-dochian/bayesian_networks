@@ -92,6 +92,7 @@ class BayesNet:
             if self.exists_path(children, end):
                 return True
 
+        print("??")
         return False
 
     def get_children(self, variable: str) -> List[str]:
@@ -150,7 +151,7 @@ class BayesNet:
         return int_graph
 
     @staticmethod
-    def get_compatible_instantiations_table(instantiation: pd.Series, cpt: pd.DataFrame):
+    def get_compatible_instantiations_table(instantiation: pd.  Series, cpt: pd.DataFrame):
         """
         Get all the entries of a CPT which are compatible with the instantiation.
 
