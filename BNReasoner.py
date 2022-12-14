@@ -5,8 +5,10 @@ from copy import deepcopy
 from BayesNet import BayesNet
 import networkx as nx
 
+
 class BNReasoner:
     def __init__(self, net: Union[str, BayesNet]):
+        self.instantiation = {}
         """
         :param net: either file path of the bayesian network in BIFXML format or BayesNet object
         """
@@ -17,19 +19,34 @@ class BNReasoner:
             self.bn.load_from_bifxml(net)
         else:
             self.bn = net
-    
-    def compute_map(self):
-        # TODO: ???
-        pass
 
-    def compute_mep(self):
-        # TODO: ???
-        pass
-
-    def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool], should_prune=True) -> pd.DataFrame:
+    def compute_map(self, Q: Dict[str, bool], e: Dict[str, bool]) -> typing.Dict[str, bool]:
         self_copy = deepcopy(self)
-        if should_prune:
-            self_copy.prune(Q=Q, e=e)
+        self_copy.prune(Q=Q, e=e)
+
+        factors = [self_copy.bn.get_cpt(variable) for variable in self_copy.bn.get_all_variables()]
+
+        # Multiply remaining factors
+        resulting_factor = BNReasoner.multiply_all_factors_together(factors)
+
+        variables_to_remove = list(filter(lambda variable: variable in Q, self_copy.bn.get_all_variables()))
+        for variable_to_remove in variables_to_remove:
+            resulting_factor = self_copy.maxing_out(variable_to_remove, resulting_factor)
+
+        return self_copy.instantiation
+
+    def compute_mpe(self, e: Dict[str, bool]) -> typing.Dict[str, bool]:
+        return self.compute_map(
+            Q=dict([(key, None) for key in list(
+                filter(lambda variable: variable not in e,
+                       self.bn.get_all_variables())
+            )]),
+            e=e
+        )
+
+    def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool]) -> pd.DataFrame:
+        self_copy = deepcopy(self)
+        self_copy.prune(Q=Q, e=e)
 
         factors = [self_copy.bn.get_cpt(variable) for variable in self_copy.bn.get_all_variables()]
 
@@ -43,6 +60,12 @@ class BNReasoner:
         factors = list(filter(lambda factor: factor is not None, factors))
 
         # Multiply remaining factors
+        resulting_factor = BNReasoner.multiply_all_factors_together(factors)
+
+        return resulting_factor
+
+    @staticmethod
+    def multiply_all_factors_together(factors: typing.List[pd.DataFrame]) -> pd.DataFrame:
         resulting_factor = None
         for factor in factors:
             if resulting_factor is None:
@@ -86,10 +109,10 @@ class BNReasoner:
         variables = self.bn.get_all_variables()
         if start not in variables or end not in variables:
             return False
-        
+
         # Building a bidirectional copy of the graph
         bidirectional_graph = self.bn.structure.to_undirected()
-        
+
         # Checking path using `networkx` builtin functionality
         return nx.has_path(bidirectional_graph, start, end)
 
@@ -151,8 +174,7 @@ class BNReasoner:
 
         return result
 
-    @staticmethod
-    def maxing_out(X: str, factor: pd.DataFrame) -> pd.DataFrame:
+    def maxing_out(self, X: str, factor: pd.DataFrame) -> pd.DataFrame:
         if X not in factor:
             return factor
 
@@ -172,11 +194,12 @@ class BNReasoner:
         result = result.reset_index()
 
         # Remove the maxed out variable
+        value = result[X][0]
         del result[X]
 
         # Rename factor
-        result = result.rename(columns={factor_name: f"max_{X} > {factor_name}"})
-
+        result = result.rename(columns={factor_name: f"max_{X}={value} > {factor_name}"})
+        self.instantiation[X] = value
         return result
 
     @staticmethod
