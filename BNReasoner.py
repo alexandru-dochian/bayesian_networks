@@ -20,7 +20,32 @@ class BNReasoner:
         else:
             self.bn = net
 
-    def compute_map(self, Q: Dict[str, bool], e: Dict[str, bool]) -> typing.Dict[str, bool]:
+    def compute_map(self, Q: Dict[str, bool], e: Dict[str, bool]) -> typing.Tuple[float, typing.Dict[str, bool]]:
+        self_copy = deepcopy(self)
+        self_copy.prune(Q=Q, e=e)
+
+        factors = [self_copy.bn.get_cpt(variable) for variable in self_copy.bn.get_all_variables()]
+
+        # Multiply remaining factors
+        resulting_factor = BNReasoner.multiply_all_factors_together(factors)
+
+        # First sum out V \ Q
+        not_in_q = list(filter(lambda variable : variable not in Q, self.bn.get_all_variables()))
+        for variable_to_remove in not_in_q:
+            resulting_factor = BNReasoner.marginalization(variable_to_remove, resulting_factor)
+
+        # Then max out variables in Q
+        variables_in_q = Q.keys()
+        for variable_to_remove in variables_in_q:
+            resulting_factor = self_copy.maxing_out(variable_to_remove, resulting_factor)
+
+        return resulting_factor.iloc[0][resulting_factor.columns.size - 1], self_copy.instantiation
+
+    def compute_mpe(self, e: Dict[str, bool]) -> typing.Dict[str, bool]:
+        Q = dict([(key, None) for key in list(
+            filter(lambda variable: variable not in e,
+                   self.bn.get_all_variables())
+        )])
         self_copy = deepcopy(self)
         self_copy.prune(Q=Q, e=e)
 
@@ -33,16 +58,7 @@ class BNReasoner:
         for variable_to_remove in variables_to_remove:
             resulting_factor = self_copy.maxing_out(variable_to_remove, resulting_factor)
 
-        return self_copy.instantiation
-
-    def compute_mpe(self, e: Dict[str, bool]) -> typing.Dict[str, bool]:
-        return self.compute_map(
-            Q=dict([(key, None) for key in list(
-                filter(lambda variable: variable not in e,
-                       self.bn.get_all_variables())
-            )]),
-            e=e
-        )
+        return resulting_factor.iloc[0][resulting_factor.columns.size - 1], self_copy.instantiation
 
     def marginal_distribution(self, Q: Dict[str, bool], e: Dict[str, bool]) -> pd.DataFrame:
         self_copy = deepcopy(self)
@@ -54,7 +70,7 @@ class BNReasoner:
         variables_to_remove = list(filter(lambda variable: variable not in Q, self_copy.bn.get_all_variables()))
 
         # Remove all other variables
-        factors = BNReasoner.variable_elimination(variables_to_remove, factors, self_copy.bn.get_interaction_graph())
+        factors = BNReasoner.variable_elimination(variables_to_remove, factors, self.bn.get_interaction_graph())
 
         # Filter out possible trivial factors
         factors = list(filter(lambda factor: factor is not None, factors))
@@ -123,6 +139,7 @@ class BNReasoner:
 
         for variable_to_remove in variables_to_remove:
             factors = list(map(lambda factor: BNReasoner.marginalization(variable_to_remove, factor), factors))
+
         return factors
 
     @staticmethod
@@ -181,21 +198,26 @@ class BNReasoner:
         factor_name = factor.columns[-1]
         new_columns = list(filter(lambda variable: variable != X, factor.columns))
         new_variables = new_columns[:-1]
-        if len(new_variables) == 0:
-            return factor
 
         # Max out
-        result = factor.groupby(new_variables).max(factor_name)
+        if len(new_variables) == 0:
+            row = factor.loc[factor[factor_name].idxmax()]
+            value = row[X]
+            result = pd.DataFrame(row)
+        else:
+            result = factor.groupby(new_variables).max(factor_name)
 
-        # Reverse dataframe to preserve initial ordering
-        result = result.iloc[::-1]
+            # Reverse dataframe to preserve initial ordering
+            result = result.iloc[::-1]
 
-        # Reset indexes from 0
-        result = result.reset_index()
+            # Reset indexes from 0
+            result = result.reset_index()
 
-        # Remove the maxed out variable
-        value = result[X][0]
-        del result[X]
+            # Remove the maxed out variable
+            value = result[X][0]
+
+        if X in result:
+            del result[X]
 
         # Rename factor
         result = result.rename(columns={factor_name: f"max_{X}={value} > {factor_name}"})
