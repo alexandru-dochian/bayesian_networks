@@ -139,6 +139,7 @@ class BNReasoner:
 
         for variable_to_remove in variables_to_remove:
             factors = list(map(lambda factor: BNReasoner.marginalization(variable_to_remove, factor), factors))
+            factors = list(filter(lambda factor: factor is not None, factors))
 
         return factors
 
